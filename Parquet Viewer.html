@@ -1,0 +1,943 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Parquet Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: one tool column. File bar and pager sit above a single working pane (table, tree or schema); a detail panel opens under the table. */
+  :root {
+    --bg: #f3f6f7;
+    --surface: #ffffff;
+    --surface-2: #e9eff1;
+    --line: #d3dcdf;
+    --fg: #182126;
+    --muted: #54646d;
+    --accent: #17695f;
+    --accent-soft: #d9eeea;
+    --accent-fg: #ffffff;
+    --danger: #a3281f;
+    --danger-soft: #fbe7e4;
+    --t-struct: #3558c9;
+    --t-list: #8a3ea8;
+    --t-map: #9a5500;
+    --t-str: #1d7746;
+    --t-num: #0b6a80;
+    --t-bool: #a52f5a;
+    --t-time: #66570a;
+    --t-null: #78858d;
+    --t-bytes: #66707a;
+    --font-ui: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1416;
+      --surface: #151d20;
+      --surface-2: #1c2629;
+      --line: #2b373c;
+      --fg: #e3eaed;
+      --muted: #93a4ac;
+      --accent: #4db8ab;
+      --accent-soft: #17332f;
+      --accent-fg: #06201d;
+      --danger: #ff9d92;
+      --danger-soft: #3a1c19;
+      --t-struct: #8aa6f2;
+      --t-list: #c78fe3;
+      --t-map: #e3a652;
+      --t-str: #74d19b;
+      --t-num: #55c4da;
+      --t-bool: #f088ad;
+      --t-time: #d3c45e;
+      --t-null: #8696a0;
+      --t-bytes: #9aa6b0;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1416;
+    --surface: #151d20;
+    --surface-2: #1c2629;
+    --line: #2b373c;
+    --fg: #e3eaed;
+    --muted: #93a4ac;
+    --accent: #4db8ab;
+    --accent-soft: #17332f;
+    --accent-fg: #06201d;
+    --danger: #ff9d92;
+    --danger-soft: #3a1c19;
+    --t-struct: #8aa6f2;
+    --t-list: #c78fe3;
+    --t-map: #e3a652;
+    --t-str: #74d19b;
+    --t-num: #55c4da;
+    --t-bool: #f088ad;
+    --t-time: #d3c45e;
+    --t-null: #8696a0;
+    --t-bytes: #9aa6b0;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.45 var(--font-ui);
+    padding-block: 20px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .app { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .mono { font-family: var(--font-mono); }
+
+  .top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+  .top > div { min-width: 0; }
+  h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--surface); color: var(--fg);
+    font: 600 13px var(--font-ui); cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn:disabled:hover { background: var(--surface); }
+  :is(.btn, .tab, .cell, .tt, .more, select):focus-visible,
+  #file:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .banner { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger); font-weight: 500; }
+  .banner[data-kind="info"] { border-color: var(--line); background: var(--surface-2); color: var(--fg); font-weight: 400; }
+
+  .filebar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  .fname { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #fname { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+  .badge { padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; }
+  .stat { display: flex; flex-direction: column; min-width: 0; }
+  .stat dt { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .stat dd { margin: 0; font: 13px var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; color: var(--muted); font: 600 13px var(--font-ui); cursor: pointer; }
+  .tab:hover { color: var(--fg); }
+  .tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+
+  .pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); }
+  .pager .range { font-variant-numeric: tabular-nums; color: var(--fg); }
+  .pager .grow { flex: 1; }
+  .pager label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); font: 13px var(--font-ui); }
+  #status { font-size: 13px; }
+
+  .tablewrap { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: min(66vh, 680px); }
+  table { border-collapse: separate; border-spacing: 0; font: 12.5px/1.4 var(--font-mono); min-width: 100%; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  tbody tr:last-child > * { border-bottom: 0; }
+  thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font-weight: 600; vertical-align: bottom; }
+  thead th .ty { display: block; margin-top: 1px; color: var(--muted); font: 500 11px var(--font-ui); }
+  .rn { position: sticky; left: 0; z-index: 1; min-width: 52px; background: var(--surface-2); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  thead .rn { z-index: 3; }
+  td { max-width: 380px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  td:hover { background: var(--surface-2); }
+  td.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .cell { display: flex; align-items: baseline; gap: 8px; max-width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .cell .pv { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+
+  .chip { flex: none; padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, currentColor 14%, transparent); font: 600 11px/1.6 var(--font-ui); white-space: nowrap; }
+  .k-struct { color: var(--t-struct); }
+  .k-list { color: var(--t-list); }
+  .k-map { color: var(--t-map); }
+  .k-str { color: var(--t-str); }
+  .k-num { color: var(--t-num); }
+  .k-bool { color: var(--t-bool); }
+  .k-time { color: var(--t-time); }
+  .k-null { color: var(--t-null); font-style: italic; }
+  .k-bytes { color: var(--t-bytes); }
+
+  .detail { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  .detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .detail-head .title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .detail-head .grow { flex: 1; }
+  .detail-body { padding: 6px 0; max-height: min(46vh, 480px); overflow: auto; }
+  .empty { padding: 18px 14px; color: var(--muted); }
+
+  .treebox { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 0; max-height: min(70vh, 740px); overflow: auto; }
+  .tools { display: flex; gap: 8px; margin-bottom: 10px; }
+  .tl { display: flex; align-items: baseline; gap: 8px; padding: 3px 14px 3px calc(14px + var(--d, 0) * 18px); font: 12.5px/1.5 var(--font-mono); min-width: max-content; }
+  .tl:hover { background: var(--surface-2); }
+  .tt { flex: none; position: relative; width: 18px; height: 18px; align-self: center; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
+  .tt::before { content: ""; position: absolute; left: 6px; top: 5px; width: 6px; height: 6px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform 0.12s; }
+  .tt[aria-expanded="true"]::before { transform: rotate(45deg); top: 4px; }
+  .sp { flex: none; width: 18px; }
+  .tk { font-weight: 600; }
+  .tv { white-space: pre; }
+  .tp { color: var(--muted); max-width: 70ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .more { display: block; margin: 3px 0; padding: 3px 14px 3px calc(14px + 18px + var(--d, 0) * 18px); border: 0; background: none; color: var(--accent); font: 600 12px var(--font-ui); cursor: pointer; text-align: left; }
+  .more:hover { text-decoration: underline; }
+
+  #schematbl td { max-width: none; cursor: default; }
+  #schematbl td:hover { background: none; }
+  #schematbl .nm { padding-left: calc(10px + var(--d, 0) * 18px); font-weight: 600; }
+  #schematbl .nm.grp { color: var(--t-struct); }
+  #schematbl td.num { font-variant-numeric: tabular-nums; }
+  .dim { color: var(--muted); }
+  .note { color: var(--muted); font-size: 13px; margin: 0; }
+
+  #pane-meta:not([hidden]) { display: flex; flex-direction: column; gap: 22px; }
+  .msec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .msec h2 { margin: 0; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+  .mt { width: 100%; }
+  .mt th, .mt td { max-width: none; white-space: normal; overflow-wrap: anywhere; vertical-align: top; cursor: default; }
+  .mt td:hover { background: none; }
+  .mt th.mk { width: 210px; background: none; color: var(--muted); font: 600 13px var(--font-ui); }
+  .kvhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px 0; }
+  .kvhead .mono { font-weight: 600; overflow-wrap: anywhere; }
+  .kvpre { margin: 0; padding: 8px 12px 12px; max-height: 260px; overflow: auto; font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .kvitem { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  .rg { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  .rg > summary { padding: 9px 14px; cursor: pointer; font-weight: 600; }
+  .rg > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .rg[open] > summary { border-bottom: 1px solid var(--line); }
+  .rg .sum { margin-left: 8px; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .rgscroll { overflow: auto; max-width: 100%; }
+  .mg td { cursor: default; }
+  .mg td:hover { background: none; }
+  .mg td.num, .mg th.num { text-align: right; }
+
+  .dropveil { display: none; position: fixed; inset: 0; z-index: 50; align-items: center; justify-content: center; pointer-events: none; background: color-mix(in srgb, var(--accent) 16%, var(--bg)); border: 3px dashed var(--accent); font-size: 20px; font-weight: 700; color: var(--accent); }
+  .dragging .dropveil { display: flex; }
+  .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; padding: 8px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-weight: 600; font-size: 13px; }
+
+  @media (max-width: 560px) {
+    .stats { gap: 6px 16px; }
+    td { max-width: 240px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tt::before { transition: none; }
+  }
+</style>
+
+<div class="app" id="app">
+  <header class="top">
+    <div>
+      <h1>Parquet Viewer</h1>
+      <p class="sub">Open a .parquet file to browse its columns, including structs, lists and maps. The file is read inside this browser tab and is never uploaded.</p>
+    </div>
+    <div class="actions">
+      <input id="file" type="file" accept=".parquet,.pq,application/octet-stream" hidden>
+      <label class="btn primary" for="file" id="openbtn">Open file…</label>
+      <button class="btn" type="button" id="exbtn">Load example</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <section class="filebar" aria-label="File summary">
+    <div class="fname"><span id="fname" class="mono"></span><span class="badge" id="exbadge" hidden>Example data</span></div>
+    <dl class="stats" id="stats"></dl>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tab-table" data-view="table" aria-selected="true" type="button">Table</button>
+    <button class="tab" role="tab" id="tab-tree" data-view="tree" aria-selected="false" type="button">Tree</button>
+    <button class="tab" role="tab" id="tab-schema" data-view="schema" aria-selected="false" type="button">Schema</button>
+    <button class="tab" role="tab" id="tab-meta" data-view="meta" aria-selected="false" type="button">Metadata</button>
+  </nav>
+
+  <div class="pager" id="pager">
+    <span class="range" id="range"></span>
+    <button class="btn small" type="button" id="prev">Previous</button>
+    <button class="btn small" type="button" id="next">Next</button>
+    <label for="pagesize">Rows per page
+      <select id="pagesize">
+        <option>25</option><option selected>50</option><option>100</option><option>250</option>
+      </select>
+    </label>
+    <span class="grow"></span>
+    <span id="status" aria-live="polite"></span>
+  </div>
+
+  <section id="pane-table" aria-labelledby="tab-table">
+    <div class="tablewrap"><table id="grid"></table></div>
+    <div class="detail" id="detail" style="margin-top:14px"></div>
+  </section>
+
+  <section id="pane-tree" aria-labelledby="tab-tree" hidden>
+    <div class="tools">
+      <button class="btn small" type="button" id="expand">Expand rows</button>
+      <button class="btn small" type="button" id="collapse">Collapse all</button>
+    </div>
+    <div class="treebox" id="tree"></div>
+  </section>
+
+  <section id="pane-schema" aria-labelledby="tab-schema" hidden>
+    <p class="note" id="schemanote" style="margin-bottom:10px"></p>
+    <div class="tablewrap"><table id="schematbl"></table></div>
+  </section>
+
+  <section id="pane-meta" aria-labelledby="tab-meta" hidden>
+    <div id="metabox"></div>
+  </section>
+</div>
+
+<div class="dropveil" aria-hidden="true">Drop a Parquet file to open it</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module">
+const H_URL = 'https://cdn.jsdelivr.net/npm/hyparquet@1.31.2/+esm';
+const C_URL = 'https://cdn.jsdelivr.net/npm/hyparquet-compressors@1.1.1/+esm';
+
+// <helpers>
+const MAXKIDS = 200;
+
+function logicalName(n) {
+  const el = n && n.el;
+  if (!el) return null;
+  return (el.logical_type && el.logical_type.type) || el.converted_type || null;
+}
+function isMapNode(n) { const l = logicalName(n); return l === 'MAP' || l === 'MAP_KEY_VALUE'; }
+function isListNode(n) { return logicalName(n) === 'LIST'; }
+
+function buildSchema(flat) {
+  let i = 0;
+  const take = () => {
+    const el = flat[i++];
+    const n = { name: el.name, el, path: [], children: [] };
+    for (let c = 0; c < (el.num_children || 0); c++) n.children.push(take());
+    return n;
+  };
+  const root = take();
+  const setPaths = (n, prefix) => { for (const c of n.children) { c.path = prefix.concat(c.name); setPaths(c, c.path); } };
+  setPaths(root, []);
+  return root;
+}
+function elementNode(n) {
+  if (!n || !n.children || !n.children[0]) return null;
+  const rep = n.children[0];
+  if (rep.children.length === 1 && rep.name !== 'array' && !/_tuple$/.test(rep.name)) return rep.children[0];
+  return rep;
+}
+function mapValueNode(n) {
+  const kv = n && n.children && n.children[0];
+  return (kv && kv.children && kv.children[1]) || null;
+}
+function childByName(n, name) {
+  return n && n.children ? (n.children.find(c => c.name === name) || null) : null;
+}
+function isTypedList(v) { return ArrayBuffer.isView(v) && !(v instanceof Uint8Array) && !(v instanceof DataView); }
+
+function describe(v, node) {
+  if (v === null || v === undefined) return { kind: 'null' };
+  if (v instanceof Date) return { kind: 'time' };
+  if (v instanceof Uint8Array) return { kind: 'bytes', count: v.length };
+  if (typeof v === 'bigint' || typeof v === 'number') return { kind: 'num' };
+  if (typeof v === 'string') return { kind: 'str' };
+  if (typeof v === 'boolean') return { kind: 'bool' };
+  const mapLike = isMapNode(node);
+  if (v instanceof Map || (mapLike && !Array.isArray(v) && typeof v === 'object')) {
+    const vn = mapValueNode(node);
+    const src = v instanceof Map ? [...v.entries()] : Object.entries(v);
+    const entries = src.map(([k, x]) => [String(k), x, vn]);
+    return { kind: 'map', entries, count: entries.length };
+  }
+  if (Array.isArray(v) || isTypedList(v)) {
+    const arr = Array.from(v);
+    if (mapLike) {
+      const vn = mapValueNode(node);
+      const entries = arr.map((e, i) => {
+        const obj = e && typeof e === 'object';
+        return [obj && 'key' in e ? String(e.key) : '[' + i + ']', obj && 'value' in e ? e.value : e, vn];
+      });
+      return { kind: 'map', entries, count: entries.length };
+    }
+    const en = elementNode(node);
+    const entries = arr.map((x, i) => ['[' + i + ']', x, en]);
+    return { kind: 'list', entries, count: entries.length };
+  }
+  if (typeof v === 'object') {
+    const entries = Object.entries(v).map(([k, x]) => [k, x, childByName(node, k)]);
+    return { kind: 'struct', entries, count: entries.length };
+  }
+  return { kind: 'str' };
+}
+
+function nodeType(node) {
+  if (!node) return null;
+  if (node.children.length) return isListNode(node) ? 'list' : isMapNode(node) ? 'map' : 'struct';
+  const l = logicalName(node);
+  if (l === 'STRING' || l === 'UTF8') return 'string';
+  if (l) return String(l).toLowerCase();
+  return node.el && node.el.type ? String(node.el.type).toLowerCase() : null;
+}
+function typeText(d, node) {
+  if (d.kind === 'struct' || d.kind === 'list' || d.kind === 'map') return d.kind;
+  const t = node && node.children.length === 0 ? nodeType(node) : null;
+  if (t) return t;
+  return { num: 'number', str: 'string', bool: 'boolean', time: 'timestamp', bytes: 'bytes', null: 'null' }[d.kind] || d.kind;
+}
+
+function toPlain(v, lim = Infinity) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'bigint') return (v >= -9007199254740991n && v <= 9007199254740991n) ? Number(v) : v.toString();
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString();
+  if (v instanceof Uint8Array) {
+    const hex = Array.from(v.subarray(0, 32), b => b.toString(16).padStart(2, '0')).join('');
+    return '0x' + hex + (v.length > 32 ? '…' : '');
+  }
+  if (v instanceof Map) {
+    const o = {}; let n = 0;
+    for (const [k, x] of v) { if (n++ >= lim) { o['…'] = '…'; break; } o[String(k)] = toPlain(x, lim); }
+    return o;
+  }
+  if (Array.isArray(v) || isTypedList(v)) {
+    const total = v.length;
+    const a = Array.from(total > lim ? Array.prototype.slice.call(v, 0, lim) : v, x => toPlain(x, lim));
+    if (total > lim) a.push('…');
+    return a;
+  }
+  if (typeof v === 'object') {
+    const o = {}; const keys = Object.keys(v);
+    for (const k of keys.slice(0, lim)) o[k] = toPlain(v[k], lim);
+    if (keys.length > lim) o['…'] = '…';
+    return o;
+  }
+  return v;
+}
+function previewText(v, max = 140) {
+  let s;
+  try { s = JSON.stringify(toPlain(v, 12)); } catch { s = String(v); }
+  if (s === undefined) s = '';
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+function fmtDate(d) {
+  return isNaN(d) ? 'Invalid date' : d.toISOString().replace('T', ' ').replace(/(\.000)?Z$/, ' UTC');
+}
+function scalarText(v, d) {
+  switch (d.kind) {
+    case 'null': return 'null';
+    case 'str': return JSON.stringify(v);
+    case 'time': return fmtDate(v);
+    case 'bytes': return toPlain(v) + '  (' + v.length + ' B)';
+    default: return String(v);
+  }
+}
+function summaryText(d) {
+  if (d.kind === 'struct') return d.count ? '{' + d.count + (d.count === 1 ? ' field' : ' fields') + '}' : '{ }';
+  if (d.kind === 'list') return d.count ? '[' + d.count + (d.count === 1 ? ' item' : ' items') + ']' : '[ ]';
+  if (d.kind === 'map') return d.count ? '{' + d.count + (d.count === 1 ? ' entry' : ' entries') + '}' : '{ }';
+  return '';
+}
+function fmtBytes(n) {
+  if (!isFinite(n) || n <= 0) return '—';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n < 10 ? 2 : 1)) + ' ' + u[i];
+}
+function columnStats(meta) {
+  const m = new Map();
+  for (const rg of (meta && meta.row_groups) || []) {
+    for (const c of rg.columns || []) {
+      const md = c.meta_data;
+      if (!md || !md.path_in_schema) continue;
+      const key = md.path_in_schema.join('.');
+      const s = m.get(key) || { codec: new Set(), enc: new Set(), comp: 0, uncomp: 0 };
+      if (md.codec) s.codec.add(String(md.codec));
+      (md.encodings || []).forEach(e => s.enc.add(String(e)));
+      s.comp += Number(md.total_compressed_size || 0);
+      s.uncomp += Number(md.total_uncompressed_size || 0);
+      m.set(key, s);
+    }
+  }
+  return m;
+}
+
+function makeExample() {
+  const STR = { logical_type: { type: 'STRING' }, converted_type: 'UTF8' };
+  const G = (name, rep, kids, extra) => ({ el: { name, repetition_type: rep, ...extra }, kids });
+  const L = (name, rep, type, extra) => ({ el: { name, repetition_type: rep, type, ...extra }, kids: [] });
+  const flat = [];
+  const flatten = s => { const el = { ...s.el }; if (s.kids.length) el.num_children = s.kids.length; flat.push(el); s.kids.forEach(flatten); };
+  flatten(G('schema', undefined, [
+    L('order_id', 'REQUIRED', 'INT64'),
+    L('placed_at', 'OPTIONAL', 'INT64', { logical_type: { type: 'TIMESTAMP' }, converted_type: 'TIMESTAMP_MILLIS' }),
+    G('customer', 'OPTIONAL', [
+      L('id', 'REQUIRED', 'INT64'),
+      L('name', 'OPTIONAL', 'BYTE_ARRAY', STR),
+      G('address', 'OPTIONAL', [L('city', 'OPTIONAL', 'BYTE_ARRAY', STR), L('country', 'OPTIONAL', 'BYTE_ARRAY', STR)]),
+    ]),
+    G('items', 'OPTIONAL', [G('list', 'REPEATED', [G('element', 'OPTIONAL', [
+      L('sku', 'OPTIONAL', 'BYTE_ARRAY', STR), L('qty', 'OPTIONAL', 'INT32'), L('unit_price', 'OPTIONAL', 'DOUBLE'),
+    ])])], { logical_type: { type: 'LIST' }, converted_type: 'LIST' }),
+    G('tags', 'OPTIONAL', [G('list', 'REPEATED', [L('element', 'OPTIONAL', 'BYTE_ARRAY', STR)])],
+      { logical_type: { type: 'LIST' }, converted_type: 'LIST' }),
+    G('attributes', 'OPTIONAL', [G('key_value', 'REPEATED', [
+      L('key', 'REQUIRED', 'BYTE_ARRAY', STR), L('value', 'OPTIONAL', 'BYTE_ARRAY', STR),
+    ])], { logical_type: { type: 'MAP' }, converted_type: 'MAP' }),
+  ]));
+
+  const people = [
+    ['Marta Ruiz', 'Valencia', 'ES'], ['Jonas Weber', 'Hamburg', 'DE'], ['Aiko Tanaka', 'Osaka', 'JP'],
+    ['Lucía Fernández', 'Sevilla', 'ES'], ['Pieter de Vries', 'Utrecht', 'NL'], ['Sofia Rossi', 'Torino', 'IT'],
+  ];
+  const catalog = [['KB-104', 79.9], ['MS-220', 34.5], ['HD-870', 129], ['CB-015', 9.95], ['LP-330', 899]];
+  const tagSets = [['gift'], ['priority', 'repeat-customer'], ['gift', 'express', 'fragile'], ['wholesale']];
+  const rows = [];
+  for (let i = 0; i < 36; i++) {
+    const p = people[i % people.length];
+    const items = [];
+    for (let j = 0; j < 1 + (i % 3); j++) {
+      const c = catalog[(i + j * 2) % catalog.length];
+      items.push({ sku: c[0], qty: 1 + ((i + j) % 4), unit_price: c[1] });
+    }
+    let attributes = null;
+    if (i % 7 !== 0) {
+      attributes = new Map([['channel', i % 2 ? 'app' : 'web']]);
+      if (i % 3 === 0) attributes.set('coupon', 'AUTUMN10');
+    }
+    rows.push({
+      order_id: BigInt(100200 + i),
+      placed_at: new Date(Date.UTC(2026, 8, 1 + Math.floor(i / 2), 8 + (i % 10), (i * 7) % 60)),
+      customer: { id: BigInt(5000 + (i % people.length)), name: p[0], address: { city: p[1], country: p[2] } },
+      items,
+      tags: i % 5 === 0 ? null : (i % 4 === 1 ? [] : tagSets[i % tagSets.length]),
+      attributes,
+    });
+  }
+  return { flat, rows };
+}
+// </helpers>
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'text') e.textContent = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+
+const state = {
+  name: '', example: false, meta: null, root: null, columns: [], total: 0,
+  page: 0, pageSize: 50, rowStart: 0, rows: [], read: null, buf: null,
+  view: 'table', sel: null, dirty: { table: true, tree: true }, busy: 0,
+};
+
+let lib = null;
+const libReady = (async () => {
+  try {
+    const m = await import(H_URL);
+    let compressors;
+    try { compressors = (await import(C_URL)).compressors; } catch { compressors = undefined; }
+    lib = { parquetReadObjects: m.parquetReadObjects, parquetMetadataAsync: m.parquetMetadataAsync, compressors };
+  } catch (e) { lib = null; }
+})();
+
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+}
+function banner(msg, kind) {
+  const b = $('banner');
+  if (!msg) { b.hidden = true; b.textContent = ''; return; }
+  b.textContent = msg; b.dataset.kind = kind || 'error'; b.hidden = false;
+}
+function status(msg) { $('status').textContent = msg || ''; }
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through */ }
+  try {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0;top:0;left:0' });
+    ta.value = text; document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch { return false; }
+}
+
+/* tree */
+function treeNode(name, value, node, depth, opts = {}) {
+  const d = describe(value, node);
+  const entries = d.entries || [];
+  const expandable = entries.length > 0;
+  const kids = h('div', { class: 'tch', hidden: true });
+  const line = h('div', { class: 'tl' });
+  line.style.setProperty('--d', depth);
+  let filled = false, toggle = null;
+
+  function setOpen(open) {
+    if (!expandable) return;
+    if (open && !filled) { filled = true; renderEntries(kids, entries, depth + 1, 0); }
+    kids.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+  }
+  if (expandable) {
+    toggle = h('button', { class: 'tt', type: 'button', 'aria-expanded': 'false', 'aria-label': 'Expand ' + name });
+    toggle.addEventListener('click', () => setOpen(kids.hidden));
+    line.append(toggle);
+  } else line.append(h('span', { class: 'sp' }));
+
+  line.append(h('span', { class: 'tk', text: name }));
+  if (d.entries) {
+    line.append(h('span', { class: 'tv k-' + d.kind, text: summaryText(d) }));
+    if (expandable) line.append(h('span', { class: 'tp', text: previewText(value, 110) }));
+  } else {
+    const full = scalarText(value, d);
+    const shown = full.length > 300 ? full.slice(0, 299) + '…' : full;
+    line.append(h('span', { class: 'tv k-' + d.kind, text: shown, title: full.length > 300 ? full : null }));
+  }
+  line.append(h('span', { class: 'chip k-' + (d.entries ? d.kind : d.kind), text: opts.chip || typeText(d, node) }));
+
+  const wrap = h('div', { class: 'tn' }, line, kids);
+  wrap.setOpen = setOpen;
+  if (opts.open) setOpen(true);
+  return wrap;
+}
+function renderEntries(container, entries, depth, from) {
+  const end = Math.min(entries.length, from + MAXKIDS);
+  for (let i = from; i < end; i++) { const [k, x, n] = entries[i]; container.append(treeNode(k, x, n, depth)); }
+  if (end < entries.length) {
+    const left = entries.length - end;
+    const more = h('button', { class: 'more', type: 'button', text: 'Show ' + Math.min(MAXKIDS, left) + ' more (' + left + ' remaining)' });
+    more.style.setProperty('--d', depth);
+    more.addEventListener('click', () => { more.remove(); renderEntries(container, entries, depth, end); });
+    container.append(more);
+  }
+}
+
+/* views */
+function renderTable() {
+  const grid = $('grid'); grid.replaceChildren();
+  const cols = state.columns;
+  grid.append(h('thead', null, h('tr', null,
+    h('th', { class: 'rn', text: '#' }),
+    cols.map(c => h('th', null, c.name, h('span', { class: 'ty', text: nodeType(c.node) || '' }))))));
+  const body = h('tbody');
+  state.rows.forEach((row, ri) => {
+    const tr = h('tr', null, h('th', { class: 'rn', text: String(state.rowStart + ri + 1) }));
+    cols.forEach((c, ci) => {
+      const v = row[c.name];
+      const d = describe(v, c.node);
+      const td = h('td', { class: d.kind === 'num' ? 'num' : null });
+      if (d.entries) {
+        td.append(h('button', { class: 'cell k-' + d.kind, type: 'button', title: 'Show ' + c.name },
+          h('span', { class: 'chip', text: d.kind + ' ' + (d.count || 0) }),
+          h('span', { class: 'pv', text: previewText(v, 120) })));
+      } else {
+        const t = scalarText(v, d);
+        td.append(h('span', { class: 'k-' + d.kind, text: t.length > 200 ? t.slice(0, 199) + '…' : t }));
+        td.title = t.length > 200 ? t.slice(0, 600) : t;
+      }
+      td.addEventListener('click', () => selectCell(ri, ci));
+      td.dataset.r = ri; td.dataset.c = ci;
+      tr.append(td);
+    });
+    body.append(tr);
+  });
+  grid.append(body);
+  if (!state.rows.length) $('detail').replaceChildren(h('div', { class: 'empty', text: 'This file has no rows.' }));
+}
+function selectCell(ri, ci) {
+  state.sel = { ri, ci };
+  for (const td of $('grid').querySelectorAll('td.sel')) td.classList.remove('sel');
+  const td = $('grid').querySelector('td[data-r="' + ri + '"][data-c="' + ci + '"]');
+  if (td) td.classList.add('sel');
+  renderDetail();
+}
+function renderDetail() {
+  const box = $('detail');
+  const s = state.sel;
+  if (!s) { box.replaceChildren(h('div', { class: 'empty', text: 'Select a cell to see its full value. Nested values open as a tree.' })); return; }
+  const col = state.columns[s.ci];
+  const v = state.rows[s.ri][col.name];
+  const d = describe(v, col.node);
+  const copy = h('button', { class: 'btn small', type: 'button', text: 'Copy as JSON' });
+  copy.addEventListener('click', async () => {
+    const ok = await copyText(JSON.stringify(toPlain(v), null, 2));
+    toast(ok ? 'Copied JSON' : 'Copy is not available here. Select the text instead.');
+  });
+  box.replaceChildren(
+    h('div', { class: 'detail-head' },
+      h('span', { class: 'title' }, 'Row ' + (state.rowStart + s.ri + 1) + ' · ', h('span', { class: 'mono', text: col.name })),
+      h('span', { class: 'chip k-' + d.kind, text: typeText(d, col.node) }),
+      h('span', { class: 'grow' }), copy),
+    h('div', { class: 'detail-body' }, treeNode(col.name, v, col.node, 0, { open: true })));
+}
+function renderTree() {
+  const t = $('tree'); t.replaceChildren();
+  if (!state.rows.length) { t.append(h('div', { class: 'empty', text: 'This file has no rows.' })); return; }
+  state.rows.forEach((row, i) => t.append(treeNode('Row ' + (state.rowStart + i + 1), row, state.root, 0, { chip: 'row' })));
+}
+function renderSchema() {
+  const tbl = $('schematbl'); tbl.replaceChildren();
+  const stats = columnStats(state.meta);
+  const hasStats = stats.size > 0;
+  $('schemanote').textContent = hasStats
+    ? 'Codec, encodings and sizes are summed over all row groups for each leaf column.'
+    : (state.example ? 'The example has no stored column chunks, so codec, encodings and sizes are blank. Open a real file to see them.' : 'This file lists no column chunk details.');
+  tbl.append(h('thead', null, h('tr', null,
+    ['Column', 'Type', 'Repetition', 'Codec', 'Encodings', 'Compressed', 'Uncompressed'].map((t, i) => h('th', { text: t, style: i > 4 ? 'text-align:right' : null })))));
+  const body = h('tbody');
+  const walk = (n, depth) => {
+    for (const c of n.children) {
+      const leaf = c.children.length === 0;
+      const st = leaf ? stats.get(c.path.join('.')) : null;
+      const phys = leaf && c.el.type && nodeType(c) !== String(c.el.type).toLowerCase() ? String(c.el.type).toLowerCase() : null;
+      const nm = h('td', { class: 'nm' + (leaf ? '' : ' grp') }, c.name);
+      nm.style.setProperty('--d', depth);
+      body.append(h('tr', null, nm,
+        h('td', null, nodeType(c) || '', phys ? h('span', { class: 'dim', text: '  ' + phys }) : null),
+        h('td', { class: 'dim', text: c.el.repetition_type ? String(c.el.repetition_type).toLowerCase() : '' }),
+        h('td', { text: st ? [...st.codec].join(', ').toLowerCase() : '' }),
+        h('td', { text: st ? [...st.enc].join(', ').toLowerCase().replaceAll('_', ' ') : '' }),
+        h('td', { class: 'num', text: st ? fmtBytes(st.comp) : '' }),
+        h('td', { class: 'num', text: st ? fmtBytes(st.uncomp) : '' })));
+      walk(c, depth + 1);
+    }
+  };
+  walk(state.root, 0);
+  tbl.append(body);
+}
+
+function fmtStat(v) {
+  if (v === null || v === undefined) return '—';
+  if (v instanceof Date) return fmtDate(v);
+  if (v instanceof Uint8Array) return String(toPlain(v));
+  const s = typeof v === 'string' ? v : String(v);
+  return s.length > 40 ? s.slice(0, 39) + '…' : s;
+}
+function kvText(v) {
+  let s = v == null ? '' : String(v);
+  try { const j = JSON.parse(s); if (j && typeof j === 'object') s = JSON.stringify(j, null, 2); } catch { /* keep raw text */ }
+  return s;
+}
+function renderMeta() {
+  const box = $('metabox'); box.replaceChildren();
+  const m = state.meta || {};
+  const rgs = m.row_groups || [];
+  let leaves = 0;
+  (function count(n) { for (const c of n.children) { if (c.children.length) count(c); else leaves++; } })(state.root);
+  const codecs = new Set(); let comp = 0, uncomp = 0;
+  for (const rg of rgs) for (const c of rg.columns || []) {
+    const md = c.meta_data; if (!md) continue;
+    if (md.codec) codecs.add(String(md.codec).toLowerCase());
+    comp += Number(md.total_compressed_size || 0); uncomp += Number(md.total_uncompressed_size || 0);
+  }
+  const sec = (title, ...kids) => h('section', { class: 'msec' }, h('h2', { text: title }), ...kids);
+
+  const info = [
+    ['File', state.name],
+    ['Created by', m.created_by || '—'],
+    ['Format version', m.version != null ? String(m.version) : '—'],
+    ['Rows', state.total.toLocaleString()],
+    ['Row groups', rgs.length ? rgs.length.toLocaleString() : '—'],
+    ['Top-level columns', String(state.columns.length)],
+    ['Leaf columns', String(leaves)],
+    ['Compression', codecs.size ? [...codecs].join(', ') : '—'],
+    ['Compressed size', comp ? fmtBytes(comp) : '—'],
+    ['Uncompressed size', uncomp ? fmtBytes(uncomp) : '—'],
+    ['Footer size', m.metadata_length ? fmtBytes(Number(m.metadata_length)) : '—'],
+  ];
+  box.append(sec('File',
+    state.example ? h('p', { class: 'note', text: 'The example is generated in this page, so it has no row groups or column chunks. Open a real file to see them.' }) : null,
+    h('div', { class: 'tablewrap', style: 'max-height:none' },
+      h('table', { class: 'mt' }, h('tbody', null, info.map(([k, v]) => h('tr', null, h('th', { class: 'mk', text: k }), h('td', { text: v }))))))));
+
+  const kvs = m.key_value_metadata || [];
+  const kvBlock = kvs.length
+    ? h('div', { style: 'display:flex;flex-direction:column;gap:8px' }, kvs.map(({ key, value }) => {
+        const full = kvText(value);
+        const shown = full.length > 4000 ? full.slice(0, 4000) + '\n… ' + (full.length - 4000).toLocaleString() + ' more characters' : full;
+        const copy = h('button', { class: 'btn small', type: 'button', text: 'Copy' });
+        copy.addEventListener('click', async () => toast((await copyText(full)) ? 'Copied value' : 'Copy is not available here. Select the text instead.'));
+        return h('div', { class: 'kvitem' },
+          h('div', { class: 'kvhead' }, h('span', { class: 'mono', text: String(key) }), copy),
+          h('pre', { class: 'kvpre', text: shown }));
+      }))
+    : h('p', { class: 'note', text: 'This file has no key-value metadata.' });
+  box.append(sec('Key-value metadata', kvBlock));
+
+  const heads = ['Column', 'Type', 'Codec', 'Encodings', 'Values', 'Nulls', 'Min', 'Max', 'Compressed', 'Uncompressed'];
+  const numHead = new Set(['Values', 'Nulls', 'Compressed', 'Uncompressed']);
+  const rgBlock = (rg, i) => {
+    const cols = rg.columns || [];
+    const rgComp = cols.reduce((a, c) => a + Number((c.meta_data && c.meta_data.total_compressed_size) || 0), 0);
+    const body = h('tbody');
+    for (const c of cols) {
+      const md = c.meta_data || {};
+      const st = md.statistics || {};
+      const mn = st.min_value !== undefined ? st.min_value : st.min;
+      const mx = st.max_value !== undefined ? st.max_value : st.max;
+      body.append(h('tr', null,
+        h('td', { text: (md.path_in_schema || []).join('.') }),
+        h('td', { text: md.type ? String(md.type).toLowerCase() : '' }),
+        h('td', { text: md.codec ? String(md.codec).toLowerCase() : '' }),
+        h('td', { text: (md.encodings || []).map(e => String(e).toLowerCase().replaceAll('_', ' ')).join(', ') }),
+        h('td', { class: 'num', text: md.num_values != null ? Number(md.num_values).toLocaleString() : '' }),
+        h('td', { class: 'num', text: st.null_count != null ? Number(st.null_count).toLocaleString() : '—' }),
+        h('td', { text: fmtStat(mn), title: mn instanceof Uint8Array ? '' : String(mn == null ? '' : mn) }),
+        h('td', { text: fmtStat(mx), title: mx instanceof Uint8Array ? '' : String(mx == null ? '' : mx) }),
+        h('td', { class: 'num', text: md.total_compressed_size != null ? fmtBytes(Number(md.total_compressed_size)) : '' }),
+        h('td', { class: 'num', text: md.total_uncompressed_size != null ? fmtBytes(Number(md.total_uncompressed_size)) : '' })));
+    }
+    return h('details', { class: 'rg', open: i === 0 },
+      h('summary', null, 'Row group ' + (i + 1),
+        h('span', { class: 'sum', text: Number(rg.num_rows || 0).toLocaleString() + ' rows · ' + cols.length + ' column chunks · ' + (rgComp ? fmtBytes(rgComp) + ' compressed' : fmtBytes(Number(rg.total_byte_size || 0)) + ' uncompressed') })),
+      h('div', { class: 'rgscroll' },
+        h('table', { class: 'mg' },
+          h('thead', null, h('tr', null, heads.map(t => h('th', { class: numHead.has(t) ? 'num' : null, text: t })))),
+          body)));
+  };
+  if (rgs.length) {
+    const wrap = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
+    const CAP = 50;
+    rgs.slice(0, CAP).forEach((rg, i) => wrap.append(rgBlock(rg, i)));
+    if (rgs.length > CAP) {
+      const more = h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', text: 'Show remaining ' + (rgs.length - CAP).toLocaleString() + ' row groups' });
+      more.addEventListener('click', () => { more.remove(); rgs.slice(CAP).forEach((rg, i) => wrap.append(rgBlock(rg, CAP + i))); });
+      wrap.append(more);
+    }
+    box.append(sec('Row groups', wrap));
+  }
+}
+
+function renderView() {
+  const v = state.view;
+  if (v === 'table' && state.dirty.table) { renderTable(); state.dirty.table = false; state.sel = null; renderDetail(); }
+  if (v === 'tree' && state.dirty.tree) { renderTree(); state.dirty.tree = false; }
+  if (v === 'schema') renderSchema();
+  if (v === 'meta') renderMeta();
+}
+function setView(v) {
+  state.view = v;
+  for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-selected', String(t.dataset.view === v));
+  $('pane-table').hidden = v !== 'table';
+  $('pane-tree').hidden = v !== 'tree';
+  $('pane-schema').hidden = v !== 'schema';
+  $('pane-meta').hidden = v !== 'meta';
+  $('pager').hidden = v === 'schema' || v === 'meta';
+  renderView();
+}
+function updatePager() {
+  const start = state.page * state.pageSize;
+  const end = Math.min(state.total, start + state.rows.length || start);
+  $('range').textContent = state.total
+    ? 'Rows ' + (start + 1).toLocaleString() + '–' + Math.max(end, start + 1).toLocaleString() + ' of ' + state.total.toLocaleString()
+    : 'No rows';
+  $('prev').disabled = state.page === 0 || state.busy > 0;
+  $('next').disabled = (state.page + 1) * state.pageSize >= state.total || state.busy > 0;
+}
+function renderStats(extra) {
+  const items = [
+    ['Rows', state.total.toLocaleString()],
+    ['Columns', String(state.columns.length)],
+    ...extra,
+  ];
+  $('stats').replaceChildren(...items.map(([k, v]) => h('div', { class: 'stat' }, h('dt', { text: k }), h('dd', { text: v }))));
+}
+
+async function loadPage() {
+  const start = state.page * state.pageSize;
+  const end = Math.min(state.total, start + state.pageSize);
+  state.busy++; updatePager(); status('Reading rows…');
+  try {
+    state.rows = end > start ? await state.read(start, end) : [];
+    state.rowStart = start;
+    banner('');
+  } catch (e) {
+    state.rows = []; state.rowStart = start;
+    let msg = 'Could not read these rows: ' + (e && e.message ? e.message : e);
+    if (lib && !lib.compressors && /compress|codec/i.test(msg)) msg += '. This file may use a compression codec that needs the extra decompression package, which did not load.';
+    banner(msg);
+  } finally { state.busy--; status(''); }
+  state.dirty = { table: true, tree: true };
+  updatePager(); renderView();
+}
+
+function adopt(info) {
+  Object.assign(state, info, { page: 0, rowStart: 0, rows: [], sel: null, dirty: { table: true, tree: true } });
+  $('fname').textContent = state.name;
+  $('exbadge').hidden = !state.example;
+  state.columns = state.root.children.map(n => ({ name: n.name, node: n }));
+}
+
+async function openFile(file) {
+  banner('');
+  status('Reading ' + file.name + '…');
+  try {
+    await libReady;
+    if (!lib) throw new Error('The Parquet reader could not be loaded from the CDN. Check your connection or any content blocker, then reload this page.');
+    const buf = { byteLength: file.size, slice: (a, b) => file.slice(a, b).arrayBuffer() };
+    const meta = await lib.parquetMetadataAsync(buf);
+    const total = Number(meta.num_rows);
+    adopt({
+      name: file.name, example: false, meta, root: buildSchema(meta.schema), total,
+      read: (a, b) => lib.parquetReadObjects({ file: buf, compressors: lib.compressors, rowStart: a, rowEnd: b }),
+    });
+    renderStats([
+      ['Row groups', String((meta.row_groups || []).length)],
+      ['Size', fmtBytes(file.size)],
+      ['Created by', meta.created_by || '—'],
+    ]);
+    status('');
+    await loadPage();
+  } catch (e) {
+    status('');
+    banner('Could not open ' + file.name + ': ' + (e && e.message ? e.message : e));
+  }
+}
+async function openExample() {
+  banner('');
+  const ex = makeExample();
+  adopt({
+    name: 'orders_example.parquet', example: true, meta: { schema: ex.flat, row_groups: [] },
+    root: buildSchema(ex.flat), total: ex.rows.length,
+    read: async (a, b) => ex.rows.slice(a, b),
+  });
+  renderStats([['Row groups', '—'], ['Created by', 'this page']]);
+  await loadPage();
+}
+
+/* wiring */
+$('file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); });
+$('exbtn').addEventListener('click', openExample);
+$('prev').addEventListener('click', () => { if (state.page > 0) { state.page--; loadPage(); } });
+$('next').addEventListener('click', () => { if ((state.page + 1) * state.pageSize < state.total) { state.page++; loadPage(); } });
+$('pagesize').addEventListener('change', e => { state.pageSize = Number(e.target.value); state.page = 0; loadPage(); });
+for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => setView(t.dataset.view));
+$('expand').addEventListener('click', () => { for (const n of $('tree').children) if (n.setOpen) n.setOpen(true); });
+$('collapse').addEventListener('click', () => { for (const n of $('tree').querySelectorAll('.tn')) if (n.setOpen) n.setOpen(false); });
+
+let dragDepth = 0;
+const app = document.body;
+window.addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { dragDepth++; app.classList.add('dragging'); e.preventDefault(); } });
+window.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) app.classList.remove('dragging'); });
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; app.classList.remove('dragging');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) openFile(f);
+});
+
+openExample().then(() => {
+  // Open on a nested cell so the tree detail is visible at first load.
+  const ci = state.columns.findIndex(c => c.name === 'items');
+  if (ci >= 0 && state.rows.length > 2) selectCell(2, ci);
+});
+</script>
+
+</body></html>
